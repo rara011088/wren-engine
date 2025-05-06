@@ -10,6 +10,7 @@ from app.model.metadata.dto import (
 )
 from app.model.metadata.metadata import Metadata
 from ibis.backends.clickhouse import Backend
+import types
 importlib.import_module("app.custom_ibis.backends.clickhouse")
 
 

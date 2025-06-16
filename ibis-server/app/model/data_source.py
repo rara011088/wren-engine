@@ -233,6 +233,7 @@ class DataSourceExtension(Enum):
             schema=info.trino_schema.get_secret_value(),
             user=(info.user and info.user.get_secret_value()),
             password=(info.password and info.password.get_secret_value()),
+            verify=False,
             **info.kwargs if info.kwargs else dict(),
         )
 

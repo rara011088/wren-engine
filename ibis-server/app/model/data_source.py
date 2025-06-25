@@ -32,6 +32,7 @@ from app.model import (
     QueryMySqlDTO,
     QueryOracleDTO,
     QueryPostgresDTO,
+    QueryRedshiftDTO,
     QueryS3FileDTO,
     QuerySnowflakeDTO,
     QueryTrinoDTO,
@@ -50,6 +51,7 @@ class DataSource(StrEnum):
     mysql = auto()
     oracle = auto()
     postgres = auto()
+    redshift = auto()
     snowflake = auto()
     trino = auto()
     local_file = auto()
@@ -79,6 +81,7 @@ class DataSourceExtension(Enum):
     mysql = QueryMySqlDTO
     oracle = QueryOracleDTO
     postgres = QueryPostgresDTO
+    redshift = QueryRedshiftDTO
     snowflake = QuerySnowflakeDTO
     trino = QueryTrinoDTO
     local_file = QueryLocalFileDTO
@@ -93,9 +96,9 @@ class DataSourceExtension(Enum):
         try:
             if hasattr(info, "connection_url"):
                 return ibis.connect(info.connection_url.get_secret_value())
-            if self.name == "local_file":
+            if self.name in {"local_file", "redshift"}:
                 raise NotImplementedError(
-                    "Local file connection is not implemented to get ibis backend"
+                    f"{self.name} connection is not implemented to get ibis backend"
                 )
             return getattr(self, f"get_{self.name}_connection")(info)
         except KeyError:
@@ -217,10 +220,11 @@ class DataSourceExtension(Enum):
     def get_snowflake_connection(info: SnowflakeConnectionInfo) -> BaseBackend:
         return ibis.snowflake.connect(
             user=info.user.get_secret_value(),
-            password=info.password.get_secret_value(),
             account=info.account.get_secret_value(),
             database=info.database.get_secret_value(),
             schema=info.sf_schema.get_secret_value(),
+            warehouse=info.warehouse.get_secret_value(),
+            private_key=info.private_key.get_secret_value(),
             **info.kwargs if info.kwargs else dict(),
         )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 from enum import Enum
+from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field, SecretStr
 from starlette.status import (
@@ -62,6 +63,10 @@ class QueryOracleDTO(QueryDTO):
 
 class QueryPostgresDTO(QueryDTO):
     connection_info: ConnectionUrl | PostgresConnectionInfo = connection_info_field
+
+
+class QueryRedshiftDTO(QueryDTO):
+    connection_info: RedshiftConnectionUnion = connection_info_field
 
 
 class QuerySnowflakeDTO(QueryDTO):
@@ -261,12 +266,57 @@ class OracleConnectionInfo(BaseConnectionInfo):
     )
 
 
-class SnowflakeConnectionInfo(BaseConnectionInfo):
+class RedshiftConnectionInfo(BaseConnectionInfo):
+    redshift_type: Literal["redshift"] = "redshift"
+    host: SecretStr = Field(
+        description="the hostname of your database", examples=["localhost"]
+    )
+    port: SecretStr = Field(description="the port of your database", examples=["5439"])
+    database: SecretStr = Field(
+        description="the database name of your database", examples=["dev"]
+    )
     user: SecretStr = Field(
-        description="the username of your database", examples=["admin"]
+        description="the username of your database", examples=["awsuser"]
     )
     password: SecretStr = Field(
         description="the password of your database", examples=["password"]
+    )
+
+
+# AWS Redshift IAM Connection Info
+# This class is used to connect to AWS Redshift using IAM authentication.
+class RedshiftIAMConnectionInfo(BaseConnectionInfo):
+    redshift_type: Literal["redshift_iam"] = "redshift_iam"
+    cluster_identifier: SecretStr = Field(
+        description="the cluster identifier of your Redshift cluster",
+        examples=["my-redshift-cluster"],
+    )
+    database: SecretStr = Field(
+        description="the database name of your database", examples=["dev"]
+    )
+    user: SecretStr = Field(
+        description="the username of your database", examples=["awsuser"]
+    )
+    region: SecretStr = Field(
+        description="the region of your database", examples=["us-west-2"]
+    )
+    access_key_id: SecretStr = Field(
+        description="the access key id of your database", examples=["AKIA..."]
+    )
+    access_key_secret: SecretStr = Field(
+        description="the secret access key of your database", examples=["my-secret-key"]
+    )
+
+
+RedshiftConnectionUnion = Annotated[
+    Union[RedshiftConnectionInfo, RedshiftIAMConnectionInfo],
+    Field(discriminator="redshift_type"),
+]
+
+
+class SnowflakeConnectionInfo(BaseConnectionInfo):
+    user: SecretStr = Field(
+        description="the username of your database", examples=["admin"]
     )
     account: SecretStr = Field(
         description="the account name of your database", examples=["myaccount"]
@@ -279,6 +329,14 @@ class SnowflakeConnectionInfo(BaseConnectionInfo):
         description="the schema name of your database",
         examples=["myschema"],
     )  # Use `sf_schema` to avoid `schema` shadowing in BaseModel
+    warehouse: SecretStr = Field(
+        description="the warehouse name of your database", examples=["COMPUTE_WH"]
+    )
+    private_key: SecretStr | None = Field(
+        description="the private key for key pair authentication",
+        examples=["private_key_content"],
+        default=None,
+    )
     kwargs: dict[str, str] | None = Field(
         description="Additional arguments passed to the DBAPI connection call.",
         default=None,
@@ -398,6 +456,8 @@ ConnectionInfo = (
     | MySqlConnectionInfo
     | OracleConnectionInfo
     | PostgresConnectionInfo
+    | RedshiftConnectionInfo
+    | RedshiftIAMConnectionInfo
     | SnowflakeConnectionInfo
     | TrinoConnectionInfo
     | LocalFileConnectionInfo

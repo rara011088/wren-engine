@@ -3,7 +3,7 @@ import base64
 import orjson
 import pytest
 
-from tests.routers.v3.connector.athena.conftest import base_url
+from tests.routers.v3.connector.redshift.conftest import base_url
 
 manifest = {
     "catalog": "wren",
@@ -12,7 +12,7 @@ manifest = {
         {
             "name": "orders",
             "tableReference": {
-                "schema": "test",
+                "schema": "public",
                 "table": "orders",
             },
             "columns": [
@@ -23,25 +23,21 @@ manifest = {
                     "expression": "o_orderstatus",
                     "type": "varchar",
                 },
-                {
-                    "name": "totalprice",
-                    "expression": "o_totalprice",
-                    "type": "float",
-                },
+                {"name": "totalprice", "expression": "o_totalprice", "type": "float"},
                 {"name": "orderdate", "expression": "o_orderdate", "type": "date"},
                 {
                     "name": "order_cust_key",
-                    "expression": "concat(cast(o_orderkey as varchar), '_', cast(o_custkey as varchar))",
+                    "expression": "concat(o_orderkey, '_', o_custkey)",
                     "type": "varchar",
                 },
                 {
                     "name": "timestamp",
-                    "expression": "TIMESTAMP '2024-01-01 23:59:59'",
+                    "expression": "cast('2024-01-01T23:59:59' as timestamp)",
                     "type": "timestamp",
                 },
                 {
                     "name": "timestamptz",
-                    "expression": "TIMESTAMP '2024-01-01 23:59:59 UTC'",
+                    "expression": "cast('2024-01-01T23:59:59' as timestamp)",
                     "type": "timestamp",
                 },
                 {
@@ -66,7 +62,7 @@ async def test_query(client, manifest_str, connection_info):
         json={
             "connectionInfo": connection_info,
             "manifestStr": manifest_str,
-            "sql": "SELECT * FROM wren.public.orders LIMIT 1",
+            "sql": "SELECT * FROM wren.public.orders ORDER BY orderkey LIMIT 1",
         },
     )
     assert response.status_code == 200
@@ -74,28 +70,24 @@ async def test_query(client, manifest_str, connection_info):
     assert len(result["columns"]) == len(manifest["models"][0]["columns"])
     assert len(result["data"]) == 1
 
-    assert result["data"][0] == [
+    assert result["data"][0][:6] == [
         1,
-        36901,
+        655,
         "O",
-        "173665.47",
-        "1996-01-02",
-        "1_36901",
-        "2024-01-01 23:59:59.000000",
-        "2024-01-01 23:59:59.000000",
-        None,
+        "347.61",
+        "2023-05-21",
+        "1_655",
     ]
-
     assert result["dtypes"] == {
         "orderkey": "int64",
         "custkey": "int64",
         "orderstatus": "string",
-        "totalprice": "decimal128(15, 2)",
+        "totalprice": "decimal128(5, 2)",
         "orderdate": "date32[day]",
         "order_cust_key": "string",
-        "timestamp": "timestamp[us]",
-        "timestamptz": "timestamp[us]",
-        "test_null_time": "timestamp[us]",
+        "timestamp": "timestamp[ns]",
+        "timestamptz": "timestamp[ns]",
+        "test_null_time": "null",
     }
 
 
@@ -149,7 +141,6 @@ async def test_query_without_manifest(client, connection_info):
     )
     assert response.status_code == 422
     result = response.json()
-    assert result["detail"][0] is not None
     assert result["detail"][0]["type"] == "missing"
     assert result["detail"][0]["loc"] == ["body", "manifestStr"]
     assert result["detail"][0]["msg"] == "Field required"
@@ -162,7 +153,6 @@ async def test_query_without_sql(client, manifest_str, connection_info):
     )
     assert response.status_code == 422
     result = response.json()
-    assert result["detail"][0] is not None
     assert result["detail"][0]["type"] == "missing"
     assert result["detail"][0]["loc"] == ["body", "sql"]
     assert result["detail"][0]["msg"] == "Field required"
@@ -178,7 +168,6 @@ async def test_query_without_connection_info(client, manifest_str):
     )
     assert response.status_code == 422
     result = response.json()
-    assert result["detail"][0] is not None
     assert result["detail"][0]["type"] == "missing"
     assert result["detail"][0]["loc"] == ["body", "connectionInfo"]
     assert result["detail"][0]["msg"] == "Field required"

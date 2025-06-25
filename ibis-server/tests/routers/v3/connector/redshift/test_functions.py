@@ -4,10 +4,8 @@ import orjson
 import pytest
 
 from app.config import get_config
-from tests.conftest import DATAFUSION_FUNCTION_COUNT
-from tests.routers.v3.connector.bigquery.conftest import base_url, function_list_path
-
-pytestmark = pytest.mark.functions
+from tests.conftest import DATAFUSION_FUNCTION_COUNT, file_path
+from tests.routers.v3.connector.redshift.conftest import base_url
 
 manifest = {
     "catalog": "my_catalog",
@@ -16,7 +14,7 @@ manifest = {
         {
             "name": "orders",
             "tableReference": {
-                "schema": "tpch_tiny",
+                "schema": "public",  # Redshift default schema
                 "table": "orders",
             },
             "columns": [
@@ -26,13 +24,25 @@ manifest = {
     ],
 }
 
+function_list_path = file_path("../resources/function_list")
+
 
 @pytest.fixture(scope="module")
 def manifest_str():
     return base64.b64encode(orjson.dumps(manifest)).decode("utf-8")
 
 
+@pytest.fixture(autouse=True)
+def set_remote_function_list_path():
+    config = get_config()
+    config.set_remote_function_list_path(function_list_path)
+    yield
+    config.set_remote_function_list_path(None)
+
+
 async def test_function_list(client):
+    # Redshift dont support jsonb type,
+    # so we use a different function list (compare to postgres)
     config = get_config()
 
     config.set_remote_function_list_path(None)
@@ -45,17 +55,12 @@ async def test_function_list(client):
     response = await client.get(url=f"{base_url}/functions")
     assert response.status_code == 200
     result = response.json()
-    assert len(result) == DATAFUSION_FUNCTION_COUNT + 35
-    the_func = next(
-        filter(
-            lambda x: x["name"] == "string_agg",
-            result,
-        )
-    )
+    assert len(result) == DATAFUSION_FUNCTION_COUNT + 12
+    the_func = next(filter(lambda x: x["name"] == "extract", result))
     assert the_func == {
-        "name": "string_agg",
-        "description": "Concatenates the values of string expressions and places separator values between them.",
-        "function_type": "aggregate",
+        "name": "extract",
+        "description": "Get subfield from date/time",
+        "function_type": "scalar",
         "param_names": None,
         "param_types": None,
         "return_type": None,
@@ -83,22 +88,6 @@ async def test_scalar_function(client, manifest_str: str, connection_info):
         "columns": ["col"],
         "data": [[1]],
         "dtypes": {"col": "int64"},
-    }
-
-    response = await client.post(
-        url=f"{base_url}/query",
-        json={
-            "connectionInfo": connection_info,
-            "manifestStr": manifest_str,
-            "sql": "SELECT date_add(CAST('2024-01-01' AS DATE), 1) as col",
-        },
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result == {
-        "columns": ["col"],
-        "data": [["2024-01-02"]],
-        "dtypes": {"col": "date32[day]"},
     }
 
 

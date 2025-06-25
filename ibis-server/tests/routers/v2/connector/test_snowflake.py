@@ -12,10 +12,11 @@ base_url = "/v2/connector/snowflake"
 
 connection_info = {
     "user": os.getenv("SNOWFLAKE_USER"),
-    "password": os.getenv("SNOWFLAKE_PASSWORD"),
     "account": os.getenv("SNOWFLAKE_ACCOUNT"),
     "database": "SNOWFLAKE_SAMPLE_DATA",
     "schema": "TPCH_SF1",
+    "warehouse": "COMPUTE_WH",
+    "private_key": os.getenv("SNOWFLAKE_PRIVATE_KEY"),
 }
 
 manifest = {
@@ -90,7 +91,7 @@ async def test_query(client, manifest_str):
         36901,
         "O",
         "173665.47",
-        "1996-01-02 00:00:00.000000",
+        "1996-01-02",
         "1_36901",
         "2024-01-01 23:59:59.000000",
         "2024-01-01 23:59:59.000000 UTC",
@@ -99,13 +100,13 @@ async def test_query(client, manifest_str):
     assert result["dtypes"] == {
         "orderkey": "int64",
         "custkey": "int64",
-        "orderstatus": "object",
-        "totalprice": "object",
-        "orderdate": "object",
-        "order_cust_key": "object",
-        "timestamp": "object",
-        "timestamptz": "object",
-        "test_null_time": "datetime64[ns]",
+        "orderstatus": "string",
+        "totalprice": "decimal128(12, 2)",
+        "orderdate": "date32[day]",
+        "order_cust_key": "string",
+        "timestamp": "timestamp[ns]",
+        "timestamptz": "timestamp[ns, tz=UTC]",
+        "test_null_time": "timestamp[ns]",
     }
 
 

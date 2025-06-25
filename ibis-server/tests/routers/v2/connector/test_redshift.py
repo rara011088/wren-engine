@@ -1,29 +1,43 @@
 import base64
 import os
-import time
 
 import orjson
 import pytest
 
 from app.model.validator import rules
 
-pytestmark = pytest.mark.bigquery
+pytestmark = pytest.mark.redshift
 
-base_url = "/v2/connector/bigquery"
+base_url = "/v2/connector/redshift"
 
+# The testing database "tpch" only has "orders" table.
 connection_info = {
-    "project_id": os.getenv("TEST_BIG_QUERY_PROJECT_ID"),
-    "dataset_id": "tpch_tiny",
-    "credentials": os.getenv("TEST_BIG_QUERY_CREDENTIALS_BASE64_JSON"),
+    "redshift_type": "redshift",
+    "host": os.getenv("TEST_REDSHIFT_HOST"),
+    "port": "5439",
+    "database": "tpch",
+    "user": os.getenv("TEST_REDSHIFT_USER", "awsuser"),
+    "password": os.getenv("TEST_REDSHIFT_PASSWORD"),
+}
+
+aws_iam_connection_info = {
+    "redshift_type": "redshift_iam",
+    "cluster_identifier": os.getenv("TEST_REDSHIFT_CLUSTER_ID"),
+    "database": "tpch",
+    "user": os.getenv("TEST_REDSHIFT_USER", "awsuser"),
+    "region": os.getenv("TEST_REDSHIFT_REGION"),
+    "access_key_id": os.getenv("TEST_REDSHIFT_ACCESS_KEY_ID"),
+    "access_key_secret": os.getenv("TEST_REDSHIFT_SECRET_ACCESS_KEY"),
 }
 
 manifest = {
     "catalog": "my_catalog",
     "schema": "my_schema",
+    "dataSource": "redshift",
     "models": [
         {
             "name": "Orders",
-            "refSql": "select * from tpch_tiny.orders",
+            "refSql": "select * from public.orders",
             "columns": [
                 {"name": "orderkey", "expression": "o_orderkey", "type": "integer"},
                 {"name": "custkey", "expression": "o_custkey", "type": "integer"},
@@ -87,91 +101,99 @@ async def test_query(client, manifest_str):
     result = response.json()
     assert len(result["columns"]) == len(manifest["models"][0]["columns"])
     assert len(result["data"]) == 1
+
     assert result["data"][0] == [
         1,
-        370,
+        655,
         "O",
-        "172799.49",
-        "1996-01-02",
-        "1_370",
+        "347.61",
+        "2023-05-21",
+        "1_655",
         "2024-01-01 23:59:59.000000",
         "2024-01-01 23:59:59.000000 UTC",
         None,
-        "616263",
+        "abc",
     ]
     assert result["dtypes"] == {
         "orderkey": "int64",
         "custkey": "int64",
         "orderstatus": "string",
-        "totalprice": "double",
+        "totalprice": "decimal128(5, 2)",
         "orderdate": "date32[day]",
         "order_cust_key": "string",
-        "timestamp": "timestamp[us]",
-        "timestamptz": "timestamp[us, tz=UTC]",
-        "test_null_time": "timestamp[us]",
-        "bytea_column": "binary",
+        "timestamp": "timestamp[ns]",
+        "timestamptz": "timestamp[ns, tz=UTC]",
+        "test_null_time": "null",
+        "bytea_column": "string",
     }
 
 
-async def test_query_with_cache(client, manifest_str):
-    # add random timestamp to the query to ensure cache is not hit
-    now = int(time.time())
-    sql = f'SELECT *, {now} FROM "Orders" ORDER BY orderkey LIMIT 1'
-    response1 = await client.post(
-        url=f"{base_url}/query?cacheEnable=true",
+async def test_query_with_aws_iam_credential(client, manifest_str):
+    response = await client.post(
+        url=f"{base_url}/query",
         json={
-            "connectionInfo": connection_info,
-            "manifestStr": manifest_str,
-            "sql": sql,
-        },
-    )
-
-    assert response1.status_code == 200
-    assert response1.headers["X-Cache-Hit"] == "false"
-    result1 = response1.json()
-
-    response2 = await client.post(
-        url=f"{base_url}/query?cacheEnable=true",
-        json={
-            "connectionInfo": connection_info,
-            "manifestStr": manifest_str,
-            "sql": sql,
-        },
-    )
-
-    assert response2.status_code == 200
-    assert response2.headers["X-Cache-Hit"] == "true"
-    assert int(response2.headers["X-Cache-Create-At"]) > 1743984000  # 2025.04.07
-    result2 = response2.json()
-
-    assert result1["dtypes"] == result2["dtypes"]
-
-
-async def test_query_with_cache_override(client, manifest_str):
-    response1 = await client.post(
-        url=f"{base_url}/query?cacheEnable=true",
-        json={
-            "connectionInfo": connection_info,
+            "connectionInfo": aws_iam_connection_info,
             "manifestStr": manifest_str,
             "sql": 'SELECT * FROM "Orders" ORDER BY orderkey LIMIT 1',
         },
     )
-    assert response1.status_code == 200
+    assert response.status_code == 200
+    result = response.json()
+    assert len(result["columns"]) == len(manifest["models"][0]["columns"])
+    assert len(result["data"]) == 1
 
-    response2 = await client.post(
-        url=f"{base_url}/query?cacheEnable=true&overrideCache=true",
+    assert result["data"][0] == [
+        1,
+        655,
+        "O",
+        "347.61",
+        "2023-05-21",
+        "1_655",
+        "2024-01-01 23:59:59.000000",
+        "2024-01-01 23:59:59.000000 UTC",
+        None,
+        "abc",
+    ]
+    assert result["dtypes"] == {
+        "orderkey": "int64",
+        "custkey": "int64",
+        "orderstatus": "object",
+        "totalprice": "object",
+        "orderdate": "object",
+        "order_cust_key": "object",
+        "timestamp": "object",
+        "timestamptz": "object",
+        "test_null_time": "object",
+        "bytea_column": "object",
+    }
+
+
+async def test_query_with_limit(client, manifest_str):
+    response = await client.post(
+        url=f"{base_url}/query",
+        params={"limit": 1},
         json={
             "connectionInfo": connection_info,
             "manifestStr": manifest_str,
-            "sql": 'SELECT * FROM "Orders" ORDER BY orderkey LIMIT 1',
+            "sql": 'SELECT * FROM "Orders"',
         },
     )
+    assert response.status_code == 200
+    result = response.json()
+    assert len(result["data"]) == 1
 
-    assert response2.status_code == 200
-    assert response2.headers["X-Cache-Override"] == "true"
-    assert int(response2.headers["X-Cache-Override-At"]) > int(
-        response2.headers["X-Cache-Create-At"]
+    response = await client.post(
+        url=f"{base_url}/query",
+        params={"limit": 1},
+        json={
+            "connectionInfo": connection_info,
+            "manifestStr": manifest_str,
+            "sql": 'SELECT * FROM "Orders" LIMIT 10',
+        },
     )
+    assert response.status_code == 200
+    result = response.json()
+    assert len(result["data"]) == 1
 
 
 async def test_query_without_manifest(client):
@@ -246,126 +268,6 @@ async def test_query_with_dry_run_and_invalid_sql(client, manifest_str):
     assert response.text is not None
 
 
-async def test_query_values(client, manifest_str):
-    response = await client.post(
-        url=f"{base_url}/query",
-        params={"dryRun": True},
-        json={
-            "connectionInfo": connection_info,
-            "manifestStr": manifest_str,
-            "sql": "SELECT * FROM (VALUES (1, 2), (3, 4))",
-        },
-    )
-
-    assert response.status_code == 204
-
-
-async def test_scientific_notation(client, manifest_str):
-    response = await client.post(
-        url=f"{base_url}/query",
-        json={
-            "connectionInfo": connection_info,
-            "manifestStr": manifest_str,
-            "sql": "SELECT cast(0 as numeric) as col",
-        },
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result["data"][0] == ["0"]
-
-
-async def test_query_empty_json(client, manifest_str):
-    """Test the empty result with json column."""
-    response = await client.post(
-        url=f"{base_url}/query",
-        json={
-            "manifestStr": manifest_str,
-            "connectionInfo": connection_info,
-            "sql": "select json_object('a', 1, 'b', 2) limit 0",
-        },
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert len(result["data"]) == 0
-    assert result["dtypes"] == {"f0_": "string"}
-
-    """Test only the json column is null."""
-    response = await client.post(
-        url=f"{base_url}/query",
-        json={
-            "manifestStr": manifest_str,
-            "connectionInfo": connection_info,
-            "sql": "select cast(null as JSON), 1",
-        },
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert len(result["data"]) == 1
-    assert result["data"][0][0] is None
-    assert result["data"][0][1] == 1
-    assert result["dtypes"] == {"f0_": "string", "f1_": "int64"}
-
-
-async def test_interval(client, manifest_str):
-    response = await client.post(
-        url=f"{base_url}/query",
-        json={
-            "connectionInfo": connection_info,
-            "manifestStr": manifest_str,
-            "sql": "SELECT INTERVAL '1' YEAR + INTERVAL '100' MONTH + INTERVAL '100' DAY + INTERVAL '1' HOUR AS col",
-        },
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result["data"][0] == ["9 years 4 months 100 days 01:00:00"]
-    assert result["dtypes"] == {"col": "month_day_nano_interval"}
-
-
-async def test_avg_interval(client, manifest_str):
-    response = await client.post(
-        url=f"{base_url}/query",
-        json={
-            "connectionInfo": connection_info,
-            "manifestStr": manifest_str,
-            "sql": "SELECT AVG(DATE '2024-01-01' - orderdate) AS col from \"Orders\"",
-        },
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result["data"][0] == ["10484 days 08:54:14.4"]
-    assert result["dtypes"] == {"col": "month_day_nano_interval"}
-
-
-async def test_custom_datatypes_no_overrides(client, manifest_str):
-    # Trigger import the official BigQueryType
-    response = await client.post(
-        url=f"{base_url}/query",
-        json={
-            "manifestStr": manifest_str,
-            "connectionInfo": connection_info,
-            "sql": "select json_object('a', 1, 'b', 2) limit 0",
-        },
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert len(result["data"]) == 0
-    assert result["dtypes"] == {"f0_": "string"}
-
-    # Should use back the custom BigQueryType
-    response = await client.post(
-        url=f"{base_url}/query",
-        json={
-            "connectionInfo": connection_info,
-            "manifestStr": manifest_str,
-            "sql": "SELECT INTERVAL '1' YEAR + INTERVAL '100' MONTH + INTERVAL '100' DAY + INTERVAL '1' HOUR AS col",
-        },
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result["data"][0] == ["9 years 4 months 100 days 01:00:00"]
-    assert result["dtypes"] == {"col": "month_day_nano_interval"}
-
-
 async def test_validate_with_unknown_rule(client, manifest_str):
     response = await client.post(
         url=f"{base_url}/validate/unknown_rule",
@@ -375,7 +277,6 @@ async def test_validate_with_unknown_rule(client, manifest_str):
             "parameters": {"modelName": "Orders", "columnName": "orderkey"},
         },
     )
-
     assert response.status_code == 404
     assert (
         response.text == f"The rule `unknown_rule` is not in the rules, rules: {rules}"
@@ -458,23 +359,26 @@ async def test_validate_rule_column_is_valid_without_one_parameter(
 
 
 async def test_metadata_list_tables(client):
-    def _assert_nested_column(column):
-        if column["nestedColumns"] is not None:
-            for nested_column in column["nestedColumns"]:
-                assert ".".join(nested_column["name"].split(".")[:-1]) == column["name"]
-                _assert_nested_column(nested_column)
-
     response = await client.post(
         url=f"{base_url}/metadata/tables",
         json={"connectionInfo": connection_info},
     )
     assert response.status_code == 200
-    res = response.json()
+    tables = response.json()
+    assert len(tables) >= 1
 
-    # assert nest_column is correct
-    for table in res:
-        for column in table["columns"]:
-            _assert_nested_column(column)
+    test_table = next(filter(lambda t: "orders" in t["name"].lower(), tables), None)
+    if test_table:
+        assert test_table["name"] is not None
+        assert test_table["properties"] is not None
+        assert test_table["properties"]["schema"] == "public"
+        assert len(test_table["columns"]) > 0
+
+        # Check column structure
+        column = test_table["columns"][0]
+        assert column["name"] is not None
+        assert column["type"] is not None
+        assert "notNull" in column
 
 
 async def test_metadata_list_constraints(client):
@@ -491,4 +395,6 @@ async def test_metadata_db_version(client):
         json={"connectionInfo": connection_info},
     )
     assert response.status_code == 200
-    assert response.text == '"Follow BigQuery release version"'
+    assert response.text is not None
+    # Should return the AWS Redshift version string
+    assert "AWS Redshift" in response.text

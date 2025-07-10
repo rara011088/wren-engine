@@ -194,7 +194,7 @@ async def test_query(client, manifest_str, oracle: OracleDbContainer):
         "1996-01-02",
         "1_370",
         "2024-01-01 23:59:59.000000",
-        "2024-01-01 23:59:59.000000 UTC",
+        "2024-01-01 23:59:59.000000 +00:00",
         None,
         "616263",
     ]
@@ -202,7 +202,7 @@ async def test_query(client, manifest_str, oracle: OracleDbContainer):
         "orderkey": "int64",
         "custkey": "int64",
         "orderstatus": "string",
-        "totalprice": "decimal128(38, 2)",
+        "totalprice": "decimal128(38, 9)",
         "orderdate": "date32[day]",
         "order_cust_key": "string",
         "timestamp": "timestamp[ns]",

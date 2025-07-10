@@ -188,7 +188,7 @@ async def test_query(client, manifest_str, postgres: PostgresContainer):
         "1996-01-02",
         "1_370",
         "2024-01-01 23:59:59.000000",
-        "2024-01-01 23:59:59.000000 UTC",
+        "2024-01-01 23:59:59.000000 +00:00",
         None,
         "616263",
     ]
@@ -1007,7 +1007,23 @@ async def test_postgis_geometry(client, manifest_str, postgis: PostgresContainer
     )
     assert response.status_code == 200
     result = response.json()
-    assert result["data"][0] == ["74.6626535"]
+    assert result["data"][0] == [74.66265347816136]
+
+
+async def test_decimal_precision(client, manifest_str, postgres: PostgresContainer):
+    connection_info = _to_connection_info(postgres)
+    response = await client.post(
+        url=f"{base_url}/query",
+        json={
+            "connectionInfo": connection_info,
+            "manifestStr": manifest_str,
+            "sql": "SELECT cast(1 as decimal(38, 8)) / cast(3 as decimal(38, 8)) as result",
+        },
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert len(result["data"]) == 1
+    assert result["data"][0][0] == "0.333333333"
 
 
 def _to_connection_info(pg: PostgresContainer):
